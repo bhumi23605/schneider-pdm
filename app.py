@@ -12,6 +12,12 @@ BCAP, DH = 2.0, 2.4                  # boiler capacity (tph), MJ per kg steam
 ZLIM = 19.1                          # z-score at which VFD health index reaches 20
 inr = lambda x: f"₹{x:,.0f}"
 
+
+def flag(ok, msg, fail=st.error):
+    """Show a success/failure banner. Returns None so Streamlit magic does not print an object."""
+    (st.success if ok else fail)(msg)
+    return None
+
 # ------------------------------------------------------------------ sidebar
 sb = st.sidebar
 sb.title("⚡ Plant settings")
@@ -195,9 +201,9 @@ with tabs[0]:
     st.dataframe(actions.style.format({"₹ / year": "₹{:,.0f}", "kWh / year": "{:,.0f}"}), hide_index=True, use_container_width=True)
     st.subheader("Quality & throughput guard-rails")
     setpoint = 7.5 - band
-    st.success(f"Air demand served: peak {cs['peak']:.1f} m³/min vs {3 * CAP:.1f} installed") if cs["peak"] <= 3 * CAP else st.error("Air demand not met")
-    st.success(f"Steam demand served: peak {bo['peak']:.1f} tph vs {2 * BCAP:.0f} tph installed") if bo["peak"] <= 2 * BCAP else st.error("Steam short")
-    (st.success if setpoint >= 6.3 else st.warning)(f"New pressure set-point {setpoint:.1f} bar (process minimum 6.0 bar + 0.3 margin)")
+    flag(cs["peak"] <= 3 * CAP, f"Air demand served: peak {cs['peak']:.1f} m³/min vs {3 * CAP:.1f} installed")
+    flag(bo["peak"] <= 2 * BCAP, f"Steam demand served: peak {bo['peak']:.1f} tph vs {2 * BCAP:.0f} tph installed")
+    flag(setpoint >= 6.3, f"New pressure set-point {setpoint:.1f} bar (process minimum 6.0 bar + 0.3 margin)", st.warning)
 
 with tabs[1]:
     st.subheader("Load / unload waste → sequencing, trim and run-hour equalisation")
@@ -231,7 +237,7 @@ with tabs[3]:
     st.write("**Feeder moves:** " + "; ".join(f"{n}: {a}→{b} ({i} A)" for n, a, b, i in pbal["moves"]))
     st.line_chart(eb.loc[:day])
     dT = eb["ΔT Y vs R,B"].loc[day]
-    (st.error if dT > 12 else st.success)(f"Y-phase joint is {dT:.1f} °C above the other phases" + (" - loose-joint alert" if dT > 12 else ""))
+    flag(dT <= 12, f"Y-phase joint is {dT:.1f} °C above the other phases" + (" - loose-joint alert" if dT > 12 else ""))
 
 with tabs[4]:
     st.subheader(f"Isolation-forest anomaly + health index (day {day})")
