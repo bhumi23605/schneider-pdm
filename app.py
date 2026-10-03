@@ -492,8 +492,8 @@ with tabs[1]:
             required_columns = [
                 "date",
                 "Usage_kWh",
-                "Lagging_Current_Reactive",
-                "Leading_Current_Reactive",
+                "Lagging_Current_Reactive.Power_kVarh",
+                "Leading_Current_Reactive_Power_kVarh",
                 "Lagging_Current_Power_Factor",
                 "Leading_Current_Power_Factor",
                 "WeekStatus",
