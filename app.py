@@ -1,4 +1,4 @@
-"""SME Utility Optimizer - digital-twin prototype (compressors, boilers, electrical, VFD PdM)."""
+"""SME Energy Intelligence & Utility Optimizer."""
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -407,11 +407,10 @@ payback = capex / tot_inr * 12 if tot_inr else float("inf")
 
 # ------------------------------------------------------------------ UI
 st.title("⚡ SME Utility Optimizer - digital twin")
-st.caption(
-    "Digital twin + Energy intelligence | "
-    "Synthetic utility scenarios + real SME steel-industry data"
+st.caption("AI energy intelligence from real SME steel-industry data "
+    "+ digital-twin optimization scenarios"
 )
-tabs = st.tabs(["Overview", "Energy Intelligence", "Compressors", "Boilers", "Electrical", "VFD health", "Architecture & data", "Business case"])
+tabs = st.tabs(["Overview", "Energy Intelligence", "Compressors", "Boilers", "Electrical", "VFD health"])
 
 with tabs[0]:
     c = st.columns(4)
@@ -782,154 +781,3 @@ with tabs[5]:
     st.line_chart(vnow[vnow.vfd == sel].set_index("day")[["rip_res", "hs_res", "cur_res"]])
     st.caption("Residuals vs load-normalised healthy behaviour (first 20 days): DC-bus ripple %, heatsink °C, current A. Data comes from standard VFD Modbus registers - no new sensors.")
 
-with tabs[6]:
-    st.subheader("System architecture")
-    st.graphviz_chart("""
-digraph G {
-
-    rankdir=LR;
-
-    node [
-        shape=box,
-        style="rounded,filled",
-        fillcolor="#eef3fb",
-        fontname="Helvetica"
-    ];
-
-    subgraph cluster_f {
-        label="Field layer";
-
-        "CT clamps / 3-ph meters";
-        "Air pressure + flow";
-        "Flue-gas O2 + stack temp";
-        "NTC/IR busbar joints";
-        "VFD Modbus registers";
-    }
-
-    subgraph cluster_e {
-        label="Edge gateway (RPi / ESP32 + Node-RED)";
-
-        "Modbus / MQTT collector";
-        "Local buffer + safety rules";
-    }
-
-    subgraph cluster_c {
-        label="Analytics (on-prem or cloud)";
-
-        "MQTT broker";
-        "TimescaleDB";
-
-        "M1 Compressor optimiser";
-        "M2 Boiler efficiency";
-        "M3 Phase / busbar / PF";
-        "M4 VFD predictive maintenance";
-
-        "M5 Energy Baseline";
-        "Energy anomaly detection";
-        "Operator recommendations";
-    }
-
-    subgraph cluster_a {
-        label="Applications";
-
-        "Streamlit dashboard";
-        "ERP: Tally / SAP B1 (CSV, REST)";
-        "GHG Protocol carbon report";
-        "WhatsApp / SMS alerts";
-    }
-
-    "CT clamps / 3-ph meters"
-        -> "Modbus / MQTT collector";
-
-    "Air pressure + flow"
-        -> "Modbus / MQTT collector";
-
-    "Flue-gas O2 + stack temp"
-        -> "Modbus / MQTT collector";
-
-    "NTC/IR busbar joints"
-        -> "Modbus / MQTT collector";
-
-    "VFD Modbus registers"
-        -> "Modbus / MQTT collector";
-
-    "Modbus / MQTT collector"
-        -> "Local buffer + safety rules"
-        -> "MQTT broker"
-        -> "TimescaleDB";
-
-
-    "TimescaleDB"
-        -> "M1 Compressor optimiser";
-
-    "TimescaleDB"
-        -> "M2 Boiler efficiency";
-
-    "TimescaleDB"
-        -> "M3 Phase / busbar / PF";
-
-    "TimescaleDB"
-        -> "M4 VFD predictive maintenance";
-
-    "TimescaleDB"
-        -> "M5 Energy Baseline";
-
-
-    "M1 Compressor optimiser"
-        -> "Streamlit dashboard";
-
-    "M2 Boiler efficiency"
-        -> "Streamlit dashboard";
-
-    "M3 Phase / busbar / PF"
-        -> "Streamlit dashboard";
-
-    "M4 VFD predictive maintenance"
-        -> "Streamlit dashboard";
-
-
-    "M5 Energy Baseline"
-        -> "Energy anomaly detection";
-
-    "Energy anomaly detection"
-        -> "Operator recommendations";
-
-    "Operator recommendations"
-        -> "Streamlit dashboard";
-
-
-    "Streamlit dashboard"
-        -> "WhatsApp / SMS alerts";
-
-    "TimescaleDB"
-        -> "ERP: Tally / SAP B1 (CSV, REST)";
-
-    "TimescaleDB"
-        -> "GHG Protocol carbon report";
-
-
-    "M1 Compressor optimiser"
-        -> "Local buffer + safety rules"
-        [
-            style=dashed,
-            label="set-point advice (operator-approved)"
-        ];
-}
-""")
-    
-    st.subheader("Data model")
-    st.code("""CREATE TABLE asset   (asset_id serial PRIMARY KEY, plant_id int, type text, tag text, rated_kw real);
-CREATE TABLE reading (ts timestamptz, asset_id int, metric text, value double precision);  -- hypertable on ts
-CREATE TABLE event   (ts timestamptz, asset_id int, severity text, code text, action text, est_saving_inr real);
-CREATE TABLE emission(month date, plant_id int, scope int, source text, qty real, unit text, tco2 real);""", language="sql")
-
-with tabs[7]:
-    st.subheader("Business case (from the sliders)")
-    c = st.columns(3)
-    c[0].metric("Installed cost", inr(capex)); c[1].metric("Annual saving", inr(tot_inr)); c[2].metric("Payback", f"{payback:.1f} months")
-    fee = st.number_input("Subscription (₹ / asset / month, 10 assets)", 0, 5000, 1000, 100)
-    st.write(f"With a subscription model the plant pays ₹0 upfront and keeps **{inr(tot_inr - fee * 10 * 12)}/yr** net; vendor recurring revenue is {inr(fee * 120)}/yr per plant.")
-    st.markdown("""
-**Segments:** foundries, forging, textiles, plastics, food processing (Pune, Coimbatore, Rajkot, Ludhiana, Ahmedabad).  
-**Scale-up:** pilot 10 plants via an industry association → ESCO shared-savings + discom/BEE/MSME scheme tie-ins → multi-plant benchmarking and buyer-facing carbon reports.  
-**Caveat:** all data here is simulated; validate constants (SEC curves, tariffs, emission factors, sensor costs) against real plant measurements before quoting figures.""")
