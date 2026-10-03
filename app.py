@@ -455,57 +455,40 @@ with tabs[0]:
 # ================================================================
 
 with tabs[1]:
-
     st.subheader(
         "🤖 AI Energy Intelligence"
     )
-
     st.caption(
         "Real SME steel-industry data + trained XGBoost energy baseline"
     )
-
     # ------------------------------------------------------------
     # Upload real plant data
     # ------------------------------------------------------------
-
     uploaded_file = st.file_uploader(
         "Upload SME plant energy data",
         type=["csv"],
         help="Upload Steel_industry_data.csv or compatible 15-minute plant energy data."
     )
-
     if uploaded_file is None:
-
         st.info(
             "Upload Steel_industry_data.csv to activate "
             "the AI Energy Intelligence module."
         )
-
         st.markdown("""
         ### What this module does
-
         **1.** Learns the plant's expected energy behavior
-
         **2.** Predicts expected 15-minute energy consumption
-
         **3.** Compares actual vs AI baseline
-
         **4.** Detects statistically unusual energy consumption
-
         **5.** Uses load type and power-quality measurements
         to help operators investigate the event
-
         **6.** Estimates potential energy and cost opportunity
         """)
-
     else:
-
         try:
-
             raw_energy_df = pd.read_csv(
                 uploaded_file
             )
-
             required_columns = [
                 "date",
                 "Usage_kWh",
@@ -516,94 +499,72 @@ with tabs[1]:
                 "WeekStatus",
                 "Load_Type"
             ]
-
             missing_columns = [
                 col
                 for col in required_columns
                 if col not in raw_energy_df.columns
             ]
-
             if missing_columns:
-
                 st.error(
                     "Missing required columns: "
                     + ", ".join(missing_columns)
                 )
-
                 st.stop()
-
             # ----------------------------------------------------
             # Run model
             # ----------------------------------------------------
-
             with st.spinner(
                 "Running AI energy analysis..."
             ):
-
                 energy_results = analyze_energy(
                     raw_energy_df
                 )
-
             # ----------------------------------------------------
             # KPI calculations
             # ----------------------------------------------------
-
             actual_energy = (
                 energy_results["Usage_kWh"].sum()
             )
-
             expected_energy = (
                 energy_results["AI_Expected_kWh"].sum()
             )
-
             potential_excess = (
                 energy_results[
                     "Potential_Excess_kWh"
                 ].sum()
             )
-
             anomaly_count = int(
                 energy_results["Anomaly"].sum()
             )
-
             # ----------------------------------------------------
             # KPI CARDS
             # ----------------------------------------------------
-
             st.subheader(
                 "Energy Performance"
             )
-
             c1, c2, c3, c4 = st.columns(4)
-
             c1.metric(
                 "Actual Energy",
                 f"{actual_energy:,.0f} kWh"
             )
-
             c2.metric(
                 "AI Baseline",
                 f"{expected_energy:,.0f} kWh"
             )
-
             c3.metric(
                 "Potential Excess",
                 f"{potential_excess:,.0f} kWh"
             )
-
             c4.metric(
                 "Anomalous Intervals",
                 f"{anomaly_count:,}"
             )
-
             # ----------------------------------------------------
             # ACTUAL VS EXPECTED
             # ----------------------------------------------------
-
             st.subheader(
                 "Actual vs AI Expected Energy"
             )
-
             chart = (
                 energy_results[
                     [
@@ -618,25 +579,20 @@ with tabs[1]:
                     "AI_Expected_kWh": "AI Expected"
                 })
             )
-
             st.line_chart(
                 chart
             )
-
             st.caption(
                 "The AI baseline represents the expected "
                 "15-minute energy consumption based on "
                 "historical operating patterns."
             )
-
             # ----------------------------------------------------
             # DEVIATION
             # ----------------------------------------------------
-
             st.subheader(
                 "Energy Deviation from Baseline"
             )
-
             deviation_chart = (
                 energy_results[
                     [
@@ -646,19 +602,15 @@ with tabs[1]:
                 ]
                 .set_index("date")
             )
-
             st.line_chart(
                 deviation_chart
             )
-
             # ----------------------------------------------------
             # ANOMALIES
             # ----------------------------------------------------
-
             st.subheader(
                 "⚠️ Highest Energy Anomalies"
             )
-
             anomalies = (
                 energy_results[
                     energy_results["Anomaly"]
@@ -668,16 +620,12 @@ with tabs[1]:
                     ascending=False
                 )
             )
-
             if len(anomalies) == 0:
-
                 st.success(
                     "No statistically significant "
                     "high-energy anomalies detected."
                 )
-
             else:
-
                 display_columns = [
                     "date",
                     "Usage_kWh",
@@ -689,7 +637,6 @@ with tabs[1]:
                     "Lagging_Current_Reactive",
                     "Z_score"
                 ]
-
                 st.dataframe(
                     anomalies[
                         display_columns
@@ -707,139 +654,100 @@ with tabs[1]:
                     hide_index=True,
                     use_container_width=True
                 )
-
                 # ------------------------------------------------
                 # INTERPRETATION
                 # ------------------------------------------------
-
                 st.subheader(
                     "🧠 Operator Interpretation"
                 )
-
                 worst = anomalies.iloc[0]
-
                 actual = worst["Usage_kWh"]
-
                 expected = worst["AI_Expected_kWh"]
-
                 deviation = worst["Deviation_%"]
-
                 load = worst["Load_Type"]
-
                 pf = worst[
                     "Lagging_Current_Power_Factor"
                 ]
-
                 reactive = worst[
                     "Lagging_Current_Reactive"
                 ]
-
                 st.warning(
                     f"""
                     **High-energy event detected**
-
                     **Time:** {worst["date"]}
-
                     **Actual consumption:** {actual:.2f} kWh
-
                     **AI expected consumption:** {expected:.2f} kWh
-
                     **Deviation:** +{deviation:.1f}%
-
                     **Operating regime:** {load}
-
                     **Lagging power factor:** {pf:.1f}
-
                     **Lagging reactive power:** {reactive:.2f}
-
                     ### Suggested investigation
-
                     • Check which equipment/processes were operating
                     during this interval.
-
                     • Verify whether the high consumption was caused
                     by a legitimate production requirement.
-
                     • If low power factor coincides with the event,
                     investigate inductive loads, motor loading and
                     power-factor compensation.
-
                     • Check whether flexible loads can be shifted
                     away from high-demand periods.
-
                     **This is an investigation opportunity, not proof
                     that all excess energy is avoidable.**
                     """
                 )
-
             # ----------------------------------------------------
             # POWER QUALITY
             # ----------------------------------------------------
-
             st.subheader(
                 "Electrical Context"
             )
-
             q1, q2, q3 = st.columns(3)
-
             q1.metric(
                 "Average Lagging PF",
                 f"{energy_results['Lagging_Current_Power_Factor'].mean():.1f}"
             )
-
             q2.metric(
                 "Average Reactive Power",
                 f"{energy_results['Lagging_Current_Reactive'].mean():.2f}"
             )
-
             q3.metric(
                 "Maximum Load Intervals",
                 f"{(energy_results['Load_Type'] == 'Maximum_Load').sum():,}"
             )
-
             st.caption(
                 "Power-factor and reactive-power values are "
                 "used as diagnostic context. They should not "
                 "be interpreted as proof of avoidable process energy."
             )
-
             # ----------------------------------------------------
             # POTENTIAL COST IMPACT
             # ----------------------------------------------------
-
             potential_cost = (
                 potential_excess *
                 tariff
             )
-
             st.subheader(
                 "💰 Potential Energy Opportunity"
             )
-
             c1, c2, c3 = st.columns(3)
 
             c1.metric(
                 "Potential excess energy",
                 f"{potential_excess:,.1f} kWh"
             )
-
             c2.metric(
                 "Electricity tariff",
                 f"₹{tariff:.2f}/kWh"
             )
-
             c3.metric(
                 "Potential cost impact",
                 inr(potential_cost)
             )
-
             st.caption(
                 "Potential opportunity = energy above the "
                 "statistical AI baseline during flagged intervals. "
                 "It is not guaranteed savings."
             )
-
-
 with tabs[2]:
     st.subheader("Load / unload waste → sequencing, trim and run-hour equalisation")
     c = st.columns(3)
