@@ -1,0 +1,22 @@
+[
+    "hour",
+    "minute",
+    "day_of_week_num",
+    "day_of_month",
+    "month",
+    "is_weekend",
+    "quarter_hour",
+    "load_type_encoded",
+    "week_status_encoded",
+    "usage_lag_1",
+    "usage_lag_2",
+    "usage_lag_4",
+    "usage_lag_8",
+    "usage_lag_96",
+    "usage_lag_672",
+    "usage_roll_mean_1h",
+    "usage_roll_mean_3h",
+    "usage_roll_mean_24h",
+    "usage_roll_std_1h",
+    "usage_roll_std_24h"
+]
