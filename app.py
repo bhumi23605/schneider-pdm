@@ -4,6 +4,12 @@ import pandas as pd
 import streamlit as st
 from sklearn.ensemble import IsolationForest
 
+import os
+import json
+import joblib
+from pathlib import Path
+
+
 st.set_page_config(page_title="SME Utility Optimizer", page_icon="⚡", layout="wide")
 
 FUELS = {"PNG": (1200, 0.0561), "Coal": (350, 0.0946), "Furnace oil": (1100, 0.0774)}  # ₹/GJ, tCO2/GJ (editable defaults)
@@ -11,6 +17,30 @@ CAP, P_LOAD, UNL = 6.5, 40.0, 0.30   # compressor m3/min, kW at full load, unloa
 BCAP, DH = 2.0, 2.4                  # boiler capacity (tph), MJ per kg steam
 ZLIM = 19.1                          # z-score at which VFD health index reaches 20
 inr = lambda x: f"₹{x:,.0f}"
+
+
+# ------------------------------------------------------------------
+# AI ENERGY FORECASTING MODEL
+# ------------------------------------------------------------------
+
+BASE_DIR = Path(__file__).resolve().parent
+
+MODEL_PATH = BASE_DIR / "energy_forecasting_xgboost.pkl"
+FEATURE_PATH = BASE_DIR / "model_features.json"
+
+
+@st.cache_resource
+def load_energy_model():
+
+    model = joblib.load(MODEL_PATH)
+
+    with open(FEATURE_PATH, "r") as f:
+        features = json.load(f)
+
+    return model, features
+
+
+energy_model, energy_features = load_energy_model()
 
 
 def flag(ok, msg, fail=st.error):
@@ -149,6 +179,218 @@ def sim_vfd():
     df["health"] = (100 * np.exp(-np.clip(df[["zr", "zh", "zc"]].max(axis=1) - 3, 0, None) / 10)).round(0)
     return df
 
+# ------------------------------------------------------------------
+# AI ENERGY INTELLIGENCE
+# ------------------------------------------------------------------
+
+def prepare_energy_data(df):
+
+    df = df.copy()
+
+    # --------------------------------------------------------------
+    # Date
+    # --------------------------------------------------------------
+
+    df["date"] = pd.to_datetime(df["date"])
+
+    df = (
+        df
+        .sort_values("date")
+        .reset_index(drop=True)
+    )
+
+    # --------------------------------------------------------------
+    # Time features
+    # --------------------------------------------------------------
+
+    df["hour"] = df["date"].dt.hour
+
+    df["minute"] = df["date"].dt.minute
+
+    df["day_of_week_num"] = (
+        df["date"].dt.dayofweek
+    )
+
+    df["day_of_month"] = (
+        df["date"].dt.day
+    )
+
+    df["month"] = (
+        df["date"].dt.month
+    )
+
+    df["is_weekend"] = (
+        df["day_of_week_num"] >= 5
+    ).astype(int)
+
+    df["quarter_hour"] = (
+        df["hour"] * 4 +
+        df["minute"] // 15
+    )
+
+    # --------------------------------------------------------------
+    # Week status
+    # --------------------------------------------------------------
+
+    df["week_status_encoded"] = (
+        df["WeekStatus"]
+        .map({
+            "Weekday": 0,
+            "Weekend": 1
+        })
+    )
+
+    # --------------------------------------------------------------
+    # Load type
+    # --------------------------------------------------------------
+
+    df["load_type_encoded"] = (
+        df["Load_Type"]
+        .map({
+            "Light_Load": 0,
+            "Medium_Load": 1,
+            "Maximum_Load": 2
+        })
+    )
+
+    # --------------------------------------------------------------
+    # Historical energy
+    # --------------------------------------------------------------
+
+    df["usage_lag_1"] = (
+        df["Usage_kWh"].shift(1)
+    )
+
+    df["usage_lag_2"] = (
+        df["Usage_kWh"].shift(2)
+    )
+
+    df["usage_lag_4"] = (
+        df["Usage_kWh"].shift(4)
+    )
+
+    df["usage_lag_8"] = (
+        df["Usage_kWh"].shift(8)
+    )
+
+    df["usage_lag_96"] = (
+        df["Usage_kWh"].shift(96)
+    )
+
+    df["usage_lag_672"] = (
+        df["Usage_kWh"].shift(672)
+    )
+
+    # --------------------------------------------------------------
+    # Rolling features
+    # --------------------------------------------------------------
+
+    df["usage_roll_mean_1h"] = (
+        df["Usage_kWh"]
+        .shift(1)
+        .rolling(4)
+        .mean()
+    )
+
+    df["usage_roll_mean_3h"] = (
+        df["Usage_kWh"]
+        .shift(1)
+        .rolling(12)
+        .mean()
+    )
+
+    df["usage_roll_mean_24h"] = (
+        df["Usage_kWh"]
+        .shift(1)
+        .rolling(96)
+        .mean()
+    )
+
+    df["usage_roll_std_1h"] = (
+        df["Usage_kWh"]
+        .shift(1)
+        .rolling(4)
+        .std()
+    )
+
+    df["usage_roll_std_24h"] = (
+        df["Usage_kWh"]
+        .shift(1)
+        .rolling(96)
+        .std()
+    )
+
+    # --------------------------------------------------------------
+    # Keep only rows where all model features exist
+    # --------------------------------------------------------------
+
+    df = df.dropna(
+        subset=energy_features
+    ).reset_index(drop=True)
+
+    return df
+
+
+def analyze_energy(df):
+
+    data = prepare_energy_data(df)
+
+    # AI predicted/expected energy
+    data["AI_Expected_kWh"] = (
+        energy_model.predict(
+            data[energy_features]
+        )
+    )
+
+    # Difference between actual and expected
+    data["Excess_kWh"] = (
+        data["Usage_kWh"] -
+        data["AI_Expected_kWh"]
+    )
+
+    # Percentage deviation
+    data["Deviation_%"] = (
+        data["Excess_kWh"] /
+        data["AI_Expected_kWh"].replace(0, np.nan)
+    ) * 100
+
+    # --------------------------------------------------------------
+    # Statistical anomaly score
+    # --------------------------------------------------------------
+
+    error_mean = data["Excess_kWh"].mean()
+
+    error_std = data["Excess_kWh"].std()
+
+    if error_std > 0:
+
+        data["Z_score"] = (
+            data["Excess_kWh"] -
+            error_mean
+        ) / error_std
+
+    else:
+
+        data["Z_score"] = 0
+
+    data["Anomaly"] = (
+        data["Z_score"] > 3
+    )
+
+    # Potential excess energy
+    data["Potential_Excess_kWh"] = np.where(
+        data["Anomaly"],
+        np.maximum(
+            data["Excess_kWh"],
+            0
+        ),
+        0
+    )
+
+    return data
+    
+
+
 
 # ------------------------------------------------------------------ run everything
 cs, cs0 = sim_comp(band, leak_cut, rot_h), sim_comp(0.0, 0, rot_h)
@@ -184,8 +426,11 @@ payback = capex / tot_inr * 12 if tot_inr else float("inf")
 
 # ------------------------------------------------------------------ UI
 st.title("⚡ SME Utility Optimizer - digital twin")
-st.caption("Compressed air · Steam · Electrical distribution · Drives  |  synthetic plant data with injected faults")
-tabs = st.tabs(["Overview", "Compressors", "Boilers", "Electrical", "VFD health", "Architecture & data", "Business case"])
+st.caption(
+    "Digital twin + AI energy intelligence | "
+    "Synthetic utility scenarios + real SME steel-industry data"
+)
+tabs = st.tabs(["Overview", "AI Energy Intelligence", "Compressors", "Boilers", "Electrical", "VFD health", "Architecture & data", "Business case"])
 
 with tabs[0]:
     c = st.columns(4)
@@ -205,7 +450,397 @@ with tabs[0]:
     flag(bo["peak"] <= 2 * BCAP, f"Steam demand served: peak {bo['peak']:.1f} tph vs {2 * BCAP:.0f} tph installed")
     flag(setpoint >= 6.3, f"New pressure set-point {setpoint:.1f} bar (process minimum 6.0 bar + 0.3 margin)", st.warning)
 
+# ================================================================
+# AI ENERGY INTELLIGENCE
+# ================================================================
+
 with tabs[1]:
+
+    st.subheader(
+        "🤖 AI Energy Intelligence"
+    )
+
+    st.caption(
+        "Real SME steel-industry data + trained XGBoost energy baseline"
+    )
+
+    # ------------------------------------------------------------
+    # Upload real plant data
+    # ------------------------------------------------------------
+
+    uploaded_file = st.file_uploader(
+        "Upload SME plant energy data",
+        type=["csv"],
+        help="Upload Steel_industry_data.csv or compatible 15-minute plant energy data."
+    )
+
+    if uploaded_file is None:
+
+        st.info(
+            "Upload Steel_industry_data.csv to activate "
+            "the AI Energy Intelligence module."
+        )
+
+        st.markdown("""
+        ### What this module does
+
+        **1.** Learns the plant's expected energy behavior
+
+        **2.** Predicts expected 15-minute energy consumption
+
+        **3.** Compares actual vs AI baseline
+
+        **4.** Detects statistically unusual energy consumption
+
+        **5.** Uses load type and power-quality measurements
+        to help operators investigate the event
+
+        **6.** Estimates potential energy and cost opportunity
+        """)
+
+    else:
+
+        try:
+
+            raw_energy_df = pd.read_csv(
+                uploaded_file
+            )
+
+            required_columns = [
+                "date",
+                "Usage_kWh",
+                "Lagging_Current_Reactive",
+                "Leading_Current_Reactive",
+                "Lagging_Current_Power_Factor",
+                "Leading_Current_Power_Factor",
+                "WeekStatus",
+                "Load_Type"
+            ]
+
+            missing_columns = [
+                col
+                for col in required_columns
+                if col not in raw_energy_df.columns
+            ]
+
+            if missing_columns:
+
+                st.error(
+                    "Missing required columns: "
+                    + ", ".join(missing_columns)
+                )
+
+                st.stop()
+
+            # ----------------------------------------------------
+            # Run model
+            # ----------------------------------------------------
+
+            with st.spinner(
+                "Running AI energy analysis..."
+            ):
+
+                energy_results = analyze_energy(
+                    raw_energy_df
+                )
+
+            # ----------------------------------------------------
+            # KPI calculations
+            # ----------------------------------------------------
+
+            actual_energy = (
+                energy_results["Usage_kWh"].sum()
+            )
+
+            expected_energy = (
+                energy_results["AI_Expected_kWh"].sum()
+            )
+
+            potential_excess = (
+                energy_results[
+                    "Potential_Excess_kWh"
+                ].sum()
+            )
+
+            anomaly_count = int(
+                energy_results["Anomaly"].sum()
+            )
+
+            # ----------------------------------------------------
+            # KPI CARDS
+            # ----------------------------------------------------
+
+            st.subheader(
+                "Energy Performance"
+            )
+
+            c1, c2, c3, c4 = st.columns(4)
+
+            c1.metric(
+                "Actual Energy",
+                f"{actual_energy:,.0f} kWh"
+            )
+
+            c2.metric(
+                "AI Baseline",
+                f"{expected_energy:,.0f} kWh"
+            )
+
+            c3.metric(
+                "Potential Excess",
+                f"{potential_excess:,.0f} kWh"
+            )
+
+            c4.metric(
+                "Anomalous Intervals",
+                f"{anomaly_count:,}"
+            )
+
+            # ----------------------------------------------------
+            # ACTUAL VS EXPECTED
+            # ----------------------------------------------------
+
+            st.subheader(
+                "Actual vs AI Expected Energy"
+            )
+
+            chart = (
+                energy_results[
+                    [
+                        "date",
+                        "Usage_kWh",
+                        "AI_Expected_kWh"
+                    ]
+                ]
+                .set_index("date")
+                .rename(columns={
+                    "Usage_kWh": "Actual",
+                    "AI_Expected_kWh": "AI Expected"
+                })
+            )
+
+            st.line_chart(
+                chart
+            )
+
+            st.caption(
+                "The AI baseline represents the expected "
+                "15-minute energy consumption based on "
+                "historical operating patterns."
+            )
+
+            # ----------------------------------------------------
+            # DEVIATION
+            # ----------------------------------------------------
+
+            st.subheader(
+                "Energy Deviation from Baseline"
+            )
+
+            deviation_chart = (
+                energy_results[
+                    [
+                        "date",
+                        "Deviation_%"
+                    ]
+                ]
+                .set_index("date")
+            )
+
+            st.line_chart(
+                deviation_chart
+            )
+
+            # ----------------------------------------------------
+            # ANOMALIES
+            # ----------------------------------------------------
+
+            st.subheader(
+                "⚠️ Highest Energy Anomalies"
+            )
+
+            anomalies = (
+                energy_results[
+                    energy_results["Anomaly"]
+                ]
+                .sort_values(
+                    "Z_score",
+                    ascending=False
+                )
+            )
+
+            if len(anomalies) == 0:
+
+                st.success(
+                    "No statistically significant "
+                    "high-energy anomalies detected."
+                )
+
+            else:
+
+                display_columns = [
+                    "date",
+                    "Usage_kWh",
+                    "AI_Expected_kWh",
+                    "Excess_kWh",
+                    "Deviation_%",
+                    "Load_Type",
+                    "Lagging_Current_Power_Factor",
+                    "Lagging_Current_Reactive",
+                    "Z_score"
+                ]
+
+                st.dataframe(
+                    anomalies[
+                        display_columns
+                    ]
+                    .head(20)
+                    .style.format({
+                        "Usage_kWh": "{:.2f}",
+                        "AI_Expected_kWh": "{:.2f}",
+                        "Excess_kWh": "{:.2f}",
+                        "Deviation_%": "{:.1f}%",
+                        "Lagging_Current_Power_Factor": "{:.1f}",
+                        "Lagging_Current_Reactive": "{:.2f}",
+                        "Z_score": "{:.2f}"
+                    }),
+                    hide_index=True,
+                    use_container_width=True
+                )
+
+                # ------------------------------------------------
+                # INTERPRETATION
+                # ------------------------------------------------
+
+                st.subheader(
+                    "🧠 Operator Interpretation"
+                )
+
+                worst = anomalies.iloc[0]
+
+                actual = worst["Usage_kWh"]
+
+                expected = worst["AI_Expected_kWh"]
+
+                deviation = worst["Deviation_%"]
+
+                load = worst["Load_Type"]
+
+                pf = worst[
+                    "Lagging_Current_Power_Factor"
+                ]
+
+                reactive = worst[
+                    "Lagging_Current_Reactive"
+                ]
+
+                st.warning(
+                    f"""
+                    **High-energy event detected**
+
+                    **Time:** {worst["date"]}
+
+                    **Actual consumption:** {actual:.2f} kWh
+
+                    **AI expected consumption:** {expected:.2f} kWh
+
+                    **Deviation:** +{deviation:.1f}%
+
+                    **Operating regime:** {load}
+
+                    **Lagging power factor:** {pf:.1f}
+
+                    **Lagging reactive power:** {reactive:.2f}
+
+                    ### Suggested investigation
+
+                    • Check which equipment/processes were operating
+                    during this interval.
+
+                    • Verify whether the high consumption was caused
+                    by a legitimate production requirement.
+
+                    • If low power factor coincides with the event,
+                    investigate inductive loads, motor loading and
+                    power-factor compensation.
+
+                    • Check whether flexible loads can be shifted
+                    away from high-demand periods.
+
+                    **This is an investigation opportunity, not proof
+                    that all excess energy is avoidable.**
+                    """
+                )
+
+            # ----------------------------------------------------
+            # POWER QUALITY
+            # ----------------------------------------------------
+
+            st.subheader(
+                "Electrical Context"
+            )
+
+            q1, q2, q3 = st.columns(3)
+
+            q1.metric(
+                "Average Lagging PF",
+                f"{energy_results['Lagging_Current_Power_Factor'].mean():.1f}"
+            )
+
+            q2.metric(
+                "Average Reactive Power",
+                f"{energy_results['Lagging_Current_Reactive'].mean():.2f}"
+            )
+
+            q3.metric(
+                "Maximum Load Intervals",
+                f"{(energy_results['Load_Type'] == 'Maximum_Load').sum():,}"
+            )
+
+            st.caption(
+                "Power-factor and reactive-power values are "
+                "used as diagnostic context. They should not "
+                "be interpreted as proof of avoidable process energy."
+            )
+
+            # ----------------------------------------------------
+            # POTENTIAL COST IMPACT
+            # ----------------------------------------------------
+
+            potential_cost = (
+                potential_excess *
+                tariff
+            )
+
+            st.subheader(
+                "💰 Potential Energy Opportunity"
+            )
+
+            c1, c2, c3 = st.columns(3)
+
+            c1.metric(
+                "Potential excess energy",
+                f"{potential_excess:,.1f} kWh"
+            )
+
+            c2.metric(
+                "Electricity tariff",
+                f"₹{tariff:.2f}/kWh"
+            )
+
+            c3.metric(
+                "Potential cost impact",
+                inr(potential_cost)
+            )
+
+            st.caption(
+                "Potential opportunity = energy above the "
+                "statistical AI baseline during flagged intervals. "
+                "It is not guaranteed savings."
+            )
+
+
+with tabs[2]:
     st.subheader("Load / unload waste → sequencing, trim and run-hour equalisation")
     c = st.columns(3)
     c[0].metric("Energy / day", f"{e_opt:,.0f} kWh", f"{e_opt - e_base:,.0f} kWh", delta_color="inverse")
@@ -218,7 +853,7 @@ with tabs[1]:
     st.bar_chart(pd.DataFrame({"Baseline (fixed lead)": cs["hb"], "Optimised (rotation)": cs["ho"]}, index=["C1", "C2", "C3"]))
     st.info("Trade-off: short rotation intervals equalise hours but add starts (each costs energy). Move the rotation slider to see both effects.")
 
-with tabs[2]:
+with tabs[3]:
     st.subheader("Indirect-method efficiency and load-sharing")
     c = st.columns(3)
     c[0].metric("Fuel / day", f"{bo['go']:,.0f} GJ", f"{bo['go'] - bo['gb']:,.0f} GJ", delta_color="inverse")
@@ -227,7 +862,7 @@ with tabs[2]:
     st.line_chart(bo["eff"])
     st.warning("Baseline alert: stack temperature rising ~30 °C over the day (soot/scaling) and O₂ at 5.5 % (excess air ≈ 35 %). Both boilers share load at ~50 % where radiation loss is high.")
 
-with tabs[3]:
+with tabs[4]:
     st.subheader("Phase balance, power factor and busbar joints")
     c = st.columns(3)
     c[0].metric("Current unbalance", f"{pbal['ua']:.1f}%", f"{pbal['ua'] - pbal['ub']:.1f} pts", delta_color="inverse")
@@ -239,7 +874,7 @@ with tabs[3]:
     dT = eb["ΔT Y vs R,B"].loc[day]
     flag(dT <= 12, f"Y-phase joint is {dT:.1f} °C above the other phases" + (" - loose-joint alert" if dT > 12 else ""))
 
-with tabs[4]:
+with tabs[5]:
     st.subheader(f"Isolation-forest anomaly + health index (day {day})")
     ZN = {"zr": "DC-bus capacitor ageing", "zh": "Heatsink / fan clogging", "zc": "Mechanical load / bearing drift"}
     rows = []
@@ -254,27 +889,148 @@ with tabs[4]:
     st.line_chart(vnow[vnow.vfd == sel].set_index("day")[["rip_res", "hs_res", "cur_res"]])
     st.caption("Residuals vs load-normalised healthy behaviour (first 20 days): DC-bus ripple %, heatsink °C, current A. Data comes from standard VFD Modbus registers - no new sensors.")
 
-with tabs[5]:
+with tabs[6]:
     st.subheader("System architecture")
-    st.graphviz_chart("""digraph G { rankdir=LR; node [shape=box, style="rounded,filled", fillcolor="#eef3fb", fontname="Helvetica"];
-    subgraph cluster_f { label="Field layer"; "CT clamps / 3-ph meters"; "Air pressure + flow"; "Flue-gas O2 + stack temp"; "NTC/IR busbar joints"; "VFD Modbus registers"; }
-    subgraph cluster_e { label="Edge gateway (RPi / ESP32 + Node-RED)"; "Modbus / MQTT collector"; "Local buffer + safety rules"; }
-    subgraph cluster_c { label="Analytics (on-prem or cloud)"; "MQTT broker"; "TimescaleDB"; "M1 Compressor optimiser"; "M2 Boiler efficiency"; "M3 Phase / busbar / PF"; "M4 VFD predictive maintenance"; }
-    subgraph cluster_a { label="Applications"; "Streamlit dashboard"; "ERP: Tally / SAP B1 (CSV, REST)"; "GHG Protocol carbon report"; "WhatsApp / SMS alerts"; }
-    "CT clamps / 3-ph meters" -> "Modbus / MQTT collector"; "Air pressure + flow" -> "Modbus / MQTT collector"; "Flue-gas O2 + stack temp" -> "Modbus / MQTT collector";
-    "NTC/IR busbar joints" -> "Modbus / MQTT collector"; "VFD Modbus registers" -> "Modbus / MQTT collector";
-    "Modbus / MQTT collector" -> "Local buffer + safety rules" -> "MQTT broker" -> "TimescaleDB";
-    "TimescaleDB" -> "M1 Compressor optimiser"; "TimescaleDB" -> "M2 Boiler efficiency"; "TimescaleDB" -> "M3 Phase / busbar / PF"; "TimescaleDB" -> "M4 VFD predictive maintenance";
-    "M1 Compressor optimiser" -> "Streamlit dashboard"; "M2 Boiler efficiency" -> "Streamlit dashboard"; "M3 Phase / busbar / PF" -> "Streamlit dashboard"; "M4 VFD predictive maintenance" -> "Streamlit dashboard";
-    "Streamlit dashboard" -> "WhatsApp / SMS alerts"; "TimescaleDB" -> "ERP: Tally / SAP B1 (CSV, REST)"; "TimescaleDB" -> "GHG Protocol carbon report";
-    "M1 Compressor optimiser" -> "Local buffer + safety rules" [style=dashed, label="set-point advice (operator-approved)"]; }""")
+    st.graphviz_chart("""
+digraph G {
+
+    rankdir=LR;
+
+    node [
+        shape=box,
+        style="rounded,filled",
+        fillcolor="#eef3fb",
+        fontname="Helvetica"
+    ];
+
+    subgraph cluster_f {
+        label="Field layer";
+
+        "CT clamps / 3-ph meters";
+        "Air pressure + flow";
+        "Flue-gas O2 + stack temp";
+        "NTC/IR busbar joints";
+        "VFD Modbus registers";
+    }
+
+    subgraph cluster_e {
+        label="Edge gateway (RPi / ESP32 + Node-RED)";
+
+        "Modbus / MQTT collector";
+        "Local buffer + safety rules";
+    }
+
+    subgraph cluster_c {
+        label="Analytics (on-prem or cloud)";
+
+        "MQTT broker";
+        "TimescaleDB";
+
+        "M1 Compressor optimiser";
+        "M2 Boiler efficiency";
+        "M3 Phase / busbar / PF";
+        "M4 VFD predictive maintenance";
+
+        "M5 AI Energy Baseline";
+        "Energy anomaly detection";
+        "Operator recommendations";
+    }
+
+    subgraph cluster_a {
+        label="Applications";
+
+        "Streamlit dashboard";
+        "ERP: Tally / SAP B1 (CSV, REST)";
+        "GHG Protocol carbon report";
+        "WhatsApp / SMS alerts";
+    }
+
+    "CT clamps / 3-ph meters"
+        -> "Modbus / MQTT collector";
+
+    "Air pressure + flow"
+        -> "Modbus / MQTT collector";
+
+    "Flue-gas O2 + stack temp"
+        -> "Modbus / MQTT collector";
+
+    "NTC/IR busbar joints"
+        -> "Modbus / MQTT collector";
+
+    "VFD Modbus registers"
+        -> "Modbus / MQTT collector";
+
+    "Modbus / MQTT collector"
+        -> "Local buffer + safety rules"
+        -> "MQTT broker"
+        -> "TimescaleDB";
+
+
+    "TimescaleDB"
+        -> "M1 Compressor optimiser";
+
+    "TimescaleDB"
+        -> "M2 Boiler efficiency";
+
+    "TimescaleDB"
+        -> "M3 Phase / busbar / PF";
+
+    "TimescaleDB"
+        -> "M4 VFD predictive maintenance";
+
+    "TimescaleDB"
+        -> "M5 AI Energy Baseline";
+
+
+    "M1 Compressor optimiser"
+        -> "Streamlit dashboard";
+
+    "M2 Boiler efficiency"
+        -> "Streamlit dashboard";
+
+    "M3 Phase / busbar / PF"
+        -> "Streamlit dashboard";
+
+    "M4 VFD predictive maintenance"
+        -> "Streamlit dashboard";
+
+
+    "M5 AI Energy Baseline"
+        -> "Energy anomaly detection";
+
+    "Energy anomaly detection"
+        -> "Operator recommendations";
+
+    "Operator recommendations"
+        -> "Streamlit dashboard";
+
+
+    "Streamlit dashboard"
+        -> "WhatsApp / SMS alerts";
+
+    "TimescaleDB"
+        -> "ERP: Tally / SAP B1 (CSV, REST)";
+
+    "TimescaleDB"
+        -> "GHG Protocol carbon report";
+
+
+    "M1 Compressor optimiser"
+        -> "Local buffer + safety rules"
+        [
+            style=dashed,
+            label="set-point advice (operator-approved)"
+        ];
+}
+""")
+    
     st.subheader("Data model")
     st.code("""CREATE TABLE asset   (asset_id serial PRIMARY KEY, plant_id int, type text, tag text, rated_kw real);
 CREATE TABLE reading (ts timestamptz, asset_id int, metric text, value double precision);  -- hypertable on ts
 CREATE TABLE event   (ts timestamptz, asset_id int, severity text, code text, action text, est_saving_inr real);
 CREATE TABLE emission(month date, plant_id int, scope int, source text, qty real, unit text, tco2 real);""", language="sql")
 
-with tabs[6]:
+with tabs[7]:
     st.subheader("Business case (from the sliders)")
     c = st.columns(3)
     c[0].metric("Installed cost", inr(capex)); c[1].metric("Annual saving", inr(tot_inr)); c[2].metric("Payback", f"{payback:.1f} months")
