@@ -748,6 +748,10 @@ with tabs[1]:
                 "statistical AI baseline during flagged intervals. "
                 "It is not guaranteed savings."
             )
+        except Exception as e:
+            st.error(f"AI Energy analysis failed: {e}")
+
+
 with tabs[2]:
     st.subheader("Load / unload waste → sequencing, trim and run-hour equalisation")
     c = st.columns(3)
