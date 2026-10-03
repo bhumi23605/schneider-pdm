@@ -459,7 +459,7 @@ with tabs[1]:
         ### What this module does
         **1.** Learns the plant's expected energy behavior
         **2.** Predicts expected 15-minute energy consumption
-        **3.** Compares actual vs AI baseline
+        **3.** Compares actual vs baseline
         **4.** Detects statistically unusual energy consumption
         **5.** Uses load type and power-quality measurements
         to help operators investigate the event
@@ -544,7 +544,7 @@ with tabs[1]:
             # ACTUAL VS EXPECTED
             # ----------------------------------------------------
             st.subheader(
-                "Actual vs AI Expected Energy"
+                "Actual vs Expected Energy"
             )
             chart = (
                 energy_results[
@@ -557,7 +557,7 @@ with tabs[1]:
                 .set_index("date")
                 .rename(columns={
                     "Usage_kWh": "Actual",
-                    "AI_Expected_kWh": "AI Expected"
+                    "AI_Expected_kWh": "Expected"
                 })
             )
             st.line_chart(
