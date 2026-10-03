@@ -408,10 +408,10 @@ payback = capex / tot_inr * 12 if tot_inr else float("inf")
 # ------------------------------------------------------------------ UI
 st.title("⚡ SME Utility Optimizer - digital twin")
 st.caption(
-    "Digital twin + AI energy intelligence | "
+    "Digital twin + Energy intelligence | "
     "Synthetic utility scenarios + real SME steel-industry data"
 )
-tabs = st.tabs(["Overview", "AI Energy Intelligence", "Compressors", "Boilers", "Electrical", "VFD health", "Architecture & data", "Business case"])
+tabs = st.tabs(["Overview", "Energy Intelligence", "Compressors", "Boilers", "Electrical", "VFD health", "Architecture & data", "Business case"])
 
 with tabs[0]:
     c = st.columns(4)
@@ -437,7 +437,7 @@ with tabs[0]:
 
 with tabs[1]:
     st.subheader(
-        "🤖 AI Energy Intelligence"
+        "Energy Intelligence"
     )
     st.caption(
         "Real SME steel-industry data + trained XGBoost energy baseline"
@@ -453,7 +453,7 @@ with tabs[1]:
     if uploaded_file is None:
         st.info(
             "Upload Steel_industry_data.csv to activate "
-            "the AI Energy Intelligence module."
+            "the Energy Intelligence module."
         )
         st.markdown("""
         ### What this module does
@@ -495,7 +495,7 @@ with tabs[1]:
             # Run model
             # ----------------------------------------------------
             with st.spinner(
-                "Running AI energy analysis..."
+                "Running energy analysis..."
             ):
                 energy_results = analyze_energy(
                     raw_energy_df
@@ -730,7 +730,7 @@ with tabs[1]:
                 "It is not guaranteed savings."
             )
         except Exception as e:
-            st.error(f"AI Energy analysis failed: {e}")
+            st.error(f"Energy analysis failed: {e}")
 
 
 with tabs[2]:
@@ -824,7 +824,7 @@ digraph G {
         "M3 Phase / busbar / PF";
         "M4 VFD predictive maintenance";
 
-        "M5 AI Energy Baseline";
+        "M5 Energy Baseline";
         "Energy anomaly detection";
         "Operator recommendations";
     }
@@ -872,7 +872,7 @@ digraph G {
         -> "M4 VFD predictive maintenance";
 
     "TimescaleDB"
-        -> "M5 AI Energy Baseline";
+        -> "M5 Energy Baseline";
 
 
     "M1 Compressor optimiser"
@@ -888,7 +888,7 @@ digraph G {
         -> "Streamlit dashboard";
 
 
-    "M5 AI Energy Baseline"
+    "M5 Energy Baseline"
         -> "Energy anomaly detection";
 
     "Energy anomaly detection"
