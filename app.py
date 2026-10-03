@@ -187,38 +187,24 @@ def prepare_energy_data(df):
 
     df = df.copy()
 
-    # --------------------------------------------------------------
-    # Date
-    # --------------------------------------------------------------
-
-    df["date"] = pd.to_datetime(df["date"])
+    df["date"] = pd.to_datetime(df["date"],dayfirst=True)
 
     df = (
         df
         .sort_values("date")
         .reset_index(drop=True)
     )
-
-    # --------------------------------------------------------------
-    # Time features
-    # --------------------------------------------------------------
-
     df["hour"] = df["date"].dt.hour
-
     df["minute"] = df["date"].dt.minute
-
     df["day_of_week_num"] = (
         df["date"].dt.dayofweek
     )
-
     df["day_of_month"] = (
         df["date"].dt.day
     )
-
     df["month"] = (
         df["date"].dt.month
     )
-
     df["is_weekend"] = (
         df["day_of_week_num"] >= 5
     ).astype(int)
@@ -227,11 +213,6 @@ def prepare_energy_data(df):
         df["hour"] * 4 +
         df["minute"] // 15
     )
-
-    # --------------------------------------------------------------
-    # Week status
-    # --------------------------------------------------------------
-
     df["week_status_encoded"] = (
         df["WeekStatus"]
         .map({
@@ -669,7 +650,7 @@ with tabs[1]:
                     "Lagging_Current_Power_Factor"
                 ]
                 reactive = worst[
-                    "Lagging_Current_Reactive"
+                    "Lagging_Current_Reactive.Power_kVarh"
                 ]
                 st.warning(
                     f"""
@@ -708,7 +689,7 @@ with tabs[1]:
             )
             q2.metric(
                 "Average Reactive Power",
-                f"{energy_results['Lagging_Current_Reactive'].mean():.2f}"
+                f"{energy_results['Lagging_Current_Reactive.Power_kVarh'].mean():.2f}"
             )
             q3.metric(
                 "Maximum Load Intervals",
