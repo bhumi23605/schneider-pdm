@@ -158,7 +158,14 @@ st.sidebar.subheader("📂 Data")
 
 uploaded_file = st.sidebar.file_uploader(
     "Upload SME energy CSV",
-    type=["csv"]
+    type=["csv"],
+    help="Current factory energy and production data"
+)
+
+benchmark_file = st.sidebar.file_uploader(
+    "Upload Industry Benchmark (optional)",
+    type=["xlsx", "xls", "csv"],
+    help="Industrial energy/emissions benchmark used only for comparison"
 )
 
 
@@ -345,6 +352,93 @@ else:
     baseline_diesel = 0
     baseline_gas = 0
 
+# ============================================================
+# INDUSTRY BENCHMARK LOADER
+# ============================================================
+
+benchmark_df = None
+benchmark_available = False
+
+if benchmark_file is not None:
+
+    try:
+
+        if benchmark_file.name.lower().endswith(".csv"):
+
+            benchmark_df = pd.read_csv(
+                benchmark_file
+            )
+
+        else:
+
+            xls = pd.ExcelFile(
+                benchmark_file
+            )
+
+            if "Energy Use Emissions" in xls.sheet_names:
+
+                benchmark_df = pd.read_excel(
+                    benchmark_file,
+                    sheet_name="Energy Use Emissions",
+                    header=1
+                )
+
+            else:
+
+                benchmark_df = pd.read_excel(
+                    benchmark_file,
+                    header=1
+                )
+
+        benchmark_df.columns = [
+            str(c).strip()
+            for c in benchmark_df.columns
+        ]
+
+        required_benchmark_columns = [
+            "Industry",
+            "Fuel Type",
+            "State"
+        ]
+
+        if all(
+            c in benchmark_df.columns
+            for c in required_benchmark_columns
+        ):
+
+            benchmark_available = True
+
+    except Exception as e:
+
+        st.sidebar.warning(
+            f"Benchmark file could not be loaded: {e}"
+        )
+
+
+# ============================================================
+# INDUSTRY NAME MAPPING
+# ============================================================
+
+benchmark_industry_map = {
+
+    "Steel Manufacturing": "Iron and Steel",
+
+    "Fabrication": "Iron and Steel",
+
+    "Automotive Components": "Transport Equipment",
+
+    "Food Processing": "Food Products",
+
+    "Textile": "Textiles",
+
+    "Other": None
+}
+
+
+benchmark_industry = benchmark_industry_map.get(
+    industry
+)
+
 
 # ============================================================
 # HEADER
@@ -379,65 +473,157 @@ tabs = st.tabs([
 # TAB 1 — CARBON FOOTPRINT
 # ============================================================
 
+# ============================================================
+# TAB 1 — DECARBONIZATION OPPORTUNITY ASSESSMENT
+# ============================================================
+
 with tabs[0]:
 
-    st.header("🏭 SME Carbon Footprint")
+    st.header(
+        "🎯 Decarbonization Opportunity Assessment"
+    )
+
+    st.caption(
+        "Turn current factory energy consumption into "
+        "measurable carbon-reduction opportunities."
+    )
+
+    # ========================================================
+    # NO CURRENT DATA
+    # ========================================================
 
     if not carbon_data_available:
 
         st.warning(
-            "Uploaded file does not contain the CarbonTwin "
-            "columns required for carbon accounting."
+            "Upload your current SME energy CSV to calculate "
+            "the factory carbon footprint."
         )
 
-        st.code(
+        st.markdown(
             """
-electricity_kwh
-diesel_litres
-natural_gas_scm
-production_tonnes
+            ### Required columns
+
+            Your current factory dataset should contain:
+
+            ```text
+            electricity_kwh
+            diesel_litres
+            natural_gas_scm
+            production_tonnes
+            ```
+
+            These represent **current factory activity data**.
             """
         )
 
     else:
 
+        # ====================================================
+        # CURRENT FACTORY BASELINE
+        # ====================================================
+
+        st.subheader("🏭 Current Factory Baseline")
+
+        # Annualized values
+        data_months = len(df)
+
+        if data_months > 0 and data_months < 12:
+
+            annual_factor = 12 / data_months
+
+        else:
+
+            annual_factor = 1
+
+        annual_emissions = (
+            total_emissions * annual_factor
+        )
+
+        annual_scope1 = (
+            total_scope1 * annual_factor
+        )
+
+        annual_scope2 = (
+            total_scope2 * annual_factor
+        )
+
+        annual_production = (
+            total_production * annual_factor
+        )
+
+        annual_electricity = (
+            baseline_electricity *
+            annual_factor
+        )
+
+        annual_diesel = (
+            baseline_diesel *
+            annual_factor
+        )
+
+        annual_gas = (
+            baseline_gas *
+            annual_factor
+        )
+
+        annual_intensity = (
+
+            annual_emissions /
+            annual_production
+
+            if annual_production > 0
+
+            else 0
+        )
+
+
+        # ====================================================
+        # KPI CARDS
+        # ====================================================
+
         c1, c2, c3, c4 = st.columns(4)
 
-        c1.metric(
-            "Total GHG",
-            f"{total_emissions:,.0f} tCO₂e"
+        with c1:
+
+            st.metric(
+                "Current GHG Footprint",
+                f"{annual_emissions:,.0f} tCO₂e/year"
+            )
+
+        with c2:
+
+            st.metric(
+                "Scope 1",
+                f"{annual_scope1:,.0f} tCO₂e/year"
+            )
+
+        with c3:
+
+            st.metric(
+                "Scope 2",
+                f"{annual_scope2:,.0f} tCO₂e/year"
+            )
+
+        with c4:
+
+            st.metric(
+                "Carbon Intensity",
+                f"{annual_intensity:.3f} tCO₂e/t"
+            )
+
+
+        # ====================================================
+        # SOURCE BREAKDOWN
+        # ====================================================
+
+        st.divider()
+
+        st.subheader(
+            "🔥 Where is the Carbon Coming From?"
         )
 
-        c2.metric(
-            "Scope 1",
-            f"{total_scope1:,.0f} tCO₂e"
-        )
+        current_breakdown = pd.DataFrame({
 
-        c3.metric(
-            "Scope 2",
-            f"{total_scope2:,.0f} tCO₂e"
-        )
-
-        c4.metric(
-            "Carbon Intensity",
-            f"{emission_intensity:.3f} tCO₂e/t"
-        )
-
-        st.subheader("🔥 Emission Hotspots")
-
-        diesel_emissions = (
-            df["scope1_diesel_kg"].sum() / 1000
-        )
-
-        gas_emissions = (
-            df["scope1_gas_kg"].sum() / 1000
-        )
-
-        electricity_emissions = (
-            df["scope2_electricity_kg"].sum() / 1000
-        )
-
-        breakdown = pd.DataFrame({
             "Source": [
                 "Grid Electricity",
                 "Diesel",
@@ -445,58 +631,47 @@ production_tonnes
             ],
 
             "Emissions": [
-                electricity_emissions,
-                diesel_emissions,
-                gas_emissions
+
+                annual_electricity *
+                electricity_ef / 1000,
+
+                annual_diesel *
+                DIESEL_EF / 1000,
+
+                annual_gas *
+                NATURAL_GAS_EF / 1000
             ]
+
         })
+
+        current_breakdown["Share"] = (
+
+            current_breakdown["Emissions"] /
+            current_breakdown["Emissions"].sum() *
+            100
+
+        )
+
 
         col1, col2 = st.columns(2)
 
+
         with col1:
 
-            fig = px.pie(
-                breakdown,
-                names="Source",
-                values="Emissions",
-                title="Carbon Footprint by Source"
-            )
-
-            st.plotly_chart(
-                fig,
-                use_container_width=True
-            )
-
-        with col2:
-
             fig = px.bar(
-                breakdown,
+                current_breakdown,
                 x="Source",
                 y="Emissions",
-                title="Emission Hotspots",
+                text="Share",
+                title="Current Carbon Sources",
                 labels={
-                    "Emissions": "tCO₂e"
+                    "Emissions": "tCO₂e/year"
                 }
             )
 
-            st.plotly_chart(
-                fig,
-                use_container_width=True
-            )
-
-        if "date" in df.columns:
-
-            df["date"] = pd.to_datetime(
-                df["date"],
-                errors="coerce"
-            )
-
-            fig = px.line(
-                df,
-                x="date",
-                y="total_tco2e",
-                markers=True,
-                title="Monthly Carbon Footprint"
+            fig.update_traces(
+                texttemplate="%{text:.1f}%",
+                textposition="outside"
             )
 
             st.plotly_chart(
@@ -505,203 +680,509 @@ production_tonnes
             )
 
 
-# ============================================================
-# TAB 2 — DIGITAL TWIN
-# ============================================================
+        with col2:
 
-with tabs[1]:
+            fig = px.pie(
+                current_breakdown,
+                names="Source",
+                values="Emissions",
+                hole=0.45,
+                title="Current Emission Mix"
+            )
 
-    st.header("🔮 Decarbonization Digital Twin")
+            st.plotly_chart(
+                fig,
+                use_container_width=True
+            )
 
-    if not carbon_data_available:
+
+        # ====================================================
+        # IDENTIFY CURRENT HOTSPOT
+        # ====================================================
+
+        hotspot = (
+            current_breakdown
+            .sort_values(
+                "Emissions",
+                ascending=False
+            )
+            .iloc[0]
+        )
+
+        hotspot_source = hotspot["Source"]
+        hotspot_share = hotspot["Share"]
 
         st.warning(
-            "Carbon data is required for the digital twin."
+            f"""
+            **Primary carbon hotspot: {hotspot_source}**
+
+            It currently contributes approximately
+            **{hotspot_share:.1f}%** of the factory's calculated
+            footprint.
+
+            This should be investigated before prioritizing
+            decarbonization investments.
+            """
         )
 
-    else:
 
-        st.write(
-            """
-            Change the intervention assumptions below and
-            simulate what happens to the SME's carbon footprint.
-            """
+        # ====================================================
+        # DECARBONIZATION OPPORTUNITY ENGINE
+        # ====================================================
+
+        st.divider()
+
+        st.subheader(
+            "🎯 Top Decarbonization Opportunities"
         )
 
-        c1, c2 = st.columns(2)
+        st.caption(
+            "Potential values are scenario estimates based on "
+            "the current factory baseline. They are not claimed "
+            "as measured savings."
+        )
+
+
+        # -----------------------------------------------
+        # USER ASSUMPTIONS
+        # -----------------------------------------------
+
+        with st.expander(
+            "⚙️ Adjust opportunity assumptions"
+        ):
+
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+
+                solar_reduction = st.slider(
+                    "Renewable electricity (%)",
+                    0,
+                    100,
+                    20,
+                    5,
+                    key="carbon_solar"
+                )
+
+            with col2:
+
+                efficiency_reduction = st.slider(
+                    "Energy efficiency (%)",
+                    0,
+                    30,
+                    10,
+                    5,
+                    key="carbon_efficiency"
+                )
+
+            with col3:
+
+                diesel_switch = st.slider(
+                    "Diesel electrification (%)",
+                    0,
+                    100,
+                    20,
+                    5,
+                    key="carbon_diesel"
+                )
+
+
+        # ====================================================
+        # OPPORTUNITY CALCULATIONS
+        # ====================================================
+
+        opportunities = []
+
+
+        # -----------------------------------------------
+        # 1. RENEWABLE ELECTRICITY
+        # -----------------------------------------------
+
+        electricity_co2 = (
+            annual_electricity *
+            electricity_ef / 1000
+        )
+
+        solar_co2_reduction = (
+            electricity_co2 *
+            solar_reduction /
+            100
+        )
+
+        solar_energy_replaced = (
+            annual_electricity *
+            solar_reduction /
+            100
+        )
+
+        solar_cost_saving = (
+            solar_energy_replaced *
+            tariff
+        )
+
+        # Illustrative investment assumption
+        solar_capex = (
+            solar_energy_replaced *
+            65000 / 1000
+        )
+
+        solar_payback = (
+
+            solar_capex /
+            solar_cost_saving
+
+            if solar_cost_saving > 0
+
+            else 0
+        )
+
+
+        opportunities.append({
+
+            "Opportunity":
+                "Renewable electricity",
+
+            "CO₂ Reduction":
+                solar_co2_reduction,
+
+            "Annual Saving":
+                solar_cost_saving,
+
+            "Investment":
+                solar_capex,
+
+            "Payback":
+                solar_payback
+
+        })
+
+
+        # -----------------------------------------------
+        # 2. ENERGY EFFICIENCY
+        # -----------------------------------------------
+
+        efficiency_energy_saved = (
+            annual_electricity *
+            efficiency_reduction /
+            100
+        )
+
+        efficiency_co2_reduction = (
+            efficiency_energy_saved *
+            electricity_ef /
+            1000
+        )
+
+        efficiency_cost_saving = (
+            efficiency_energy_saved *
+            tariff
+        )
+
+        efficiency_capex = (
+            efficiency_cost_saving *
+            2.0
+        )
+
+        efficiency_payback = (
+
+            efficiency_capex /
+            efficiency_cost_saving
+
+            if efficiency_cost_saving > 0
+
+            else 0
+        )
+
+
+        opportunities.append({
+
+            "Opportunity":
+                "Energy efficiency / VFD optimization",
+
+            "CO₂ Reduction":
+                efficiency_co2_reduction,
+
+            "Annual Saving":
+                efficiency_cost_saving,
+
+            "Investment":
+                efficiency_capex,
+
+            "Payback":
+                efficiency_payback
+
+        })
+
+
+        # -----------------------------------------------
+        # 3. DIESEL ELECTRIFICATION
+        # -----------------------------------------------
+
+        diesel_co2 = (
+            annual_diesel *
+            DIESEL_EF /
+            1000
+        )
+
+        diesel_co2_reduction = (
+            diesel_co2 *
+            diesel_switch /
+            100
+        )
+
+        diesel_litres_replaced = (
+            annual_diesel *
+            diesel_switch /
+            100
+        )
+
+        diesel_cost_saving = (
+            diesel_litres_replaced *
+            90
+        )
+
+        diesel_capex = (
+            diesel_cost_saving *
+            2.5
+        )
+
+        diesel_payback = (
+
+            diesel_capex /
+            diesel_cost_saving
+
+            if diesel_cost_saving > 0
+
+            else 0
+        )
+
+
+        opportunities.append({
+
+            "Opportunity":
+                "Diesel → electric conversion",
+
+            "CO₂ Reduction":
+                diesel_co2_reduction,
+
+            "Annual Saving":
+                diesel_cost_saving,
+
+            "Investment":
+                diesel_capex,
+
+            "Payback":
+                diesel_payback
+
+        })
+
+
+        # ====================================================
+        # OPPORTUNITY TABLE
+        # ====================================================
+
+        opportunity_df = pd.DataFrame(
+            opportunities
+        )
+
+
+        # Rank by CO2 reduction
+        opportunity_df = (
+            opportunity_df
+            .sort_values(
+                "CO₂ Reduction",
+                ascending=False
+            )
+            .reset_index(drop=True)
+        )
+
+
+        opportunity_df.insert(
+            0,
+            "Priority",
+            [
+                "🔴 HIGH",
+                "🟠 MEDIUM",
+                "🟡 MEDIUM"
+            ][:len(opportunity_df)]
+        )
+
+
+        display_opportunities = (
+            opportunity_df.copy()
+        )
+
+        display_opportunities[
+            "CO₂ Reduction"
+        ] = display_opportunities[
+            "CO₂ Reduction"
+        ].map(
+            lambda x: f"{x:,.1f} tCO₂e/year"
+        )
+
+        display_opportunities[
+            "Annual Saving"
+        ] = display_opportunities[
+            "Annual Saving"
+        ].map(
+            lambda x: f"₹{x:,.0f}/year"
+        )
+
+        display_opportunities[
+            "Investment"
+        ] = display_opportunities[
+            "Investment"
+        ].map(
+            lambda x: f"₹{x:,.0f}"
+        )
+
+        display_opportunities[
+            "Payback"
+        ] = display_opportunities[
+            "Payback"
+        ].map(
+            lambda x: f"{x:.1f} years"
+        )
+
+
+        st.dataframe(
+            display_opportunities,
+            hide_index=True,
+            use_container_width=True
+        )
+
+
+        # ====================================================
+        # TOTAL OPPORTUNITY
+        # ====================================================
+
+        total_potential_reduction = (
+            opportunity_df[
+                "CO₂ Reduction"
+            ].sum()
+        )
+
+        total_annual_saving = (
+            opportunity_df[
+                "Annual Saving"
+            ].sum()
+        )
+
+        total_investment = (
+            opportunity_df[
+                "Investment"
+            ].sum()
+        )
+
+        portfolio_payback = (
+
+            total_investment /
+            total_annual_saving
+
+            if total_annual_saving > 0
+
+            else 0
+        )
+
+        reduction_percentage = (
+
+            total_potential_reduction /
+            annual_emissions *
+            100
+
+            if annual_emissions > 0
+
+            else 0
+        )
+
+        # Don't allow the dashboard to claim >100%
+        reduction_percentage = min(
+            reduction_percentage,
+            100
+        )
+
+
+        # ====================================================
+        # OPPORTUNITY SUMMARY
+        # ====================================================
+
+        st.divider()
+
+        st.subheader(
+            "📉 Decarbonization Potential"
+        )
+
+        c1, c2, c3, c4 = st.columns(4)
 
         with c1:
 
-            solar_percentage = st.slider(
-                "☀️ Solar adoption (%)",
-                0,
-                100,
-                20
-            )
-
-            efficiency_percentage = st.slider(
-                "⚡ Energy efficiency improvement (%)",
-                0,
-                30,
-                10
+            st.metric(
+                "Potential CO₂ Reduction",
+                f"{total_potential_reduction:,.0f} "
+                "tCO₂e/year"
             )
 
         with c2:
 
-            fuel_switch_percentage = st.slider(
-                "🔋 Diesel → Electric (%)",
-                0,
-                100,
-                0
+            st.metric(
+                "Potential Reduction",
+                f"{reduction_percentage:.1f}%"
             )
 
-            renewable_percentage = st.slider(
-                "🌱 Renewable electricity contract (%)",
-                0,
-                100,
-                0
+        with c3:
+
+            st.metric(
+                "Potential Annual Saving",
+                f"₹{total_annual_saving / 100000:.2f} L"
             )
 
-        # ----------------------------------------------------
-        # Scenario calculation
-        # ----------------------------------------------------
+        with c4:
 
-        # Efficiency reduces electricity demand first.
+            st.metric(
+                "Portfolio Payback",
+                f"{portfolio_payback:.1f} years"
+            )
 
-        efficient_electricity = (
-            baseline_electricity *
-            (1 - efficiency_percentage / 100)
-        )
 
-        # Solar supplies a percentage of remaining demand.
+        # ====================================================
+        # CURRENT VS POTENTIAL
+        # ====================================================
 
-        solar_energy = (
-            efficient_electricity *
-            solar_percentage / 100
-        )
-
-        grid_after_solar = (
-            efficient_electricity -
-            solar_energy
-        )
-
-        # Renewable electricity contract
-
-        renewable_energy = (
-            grid_after_solar *
-            renewable_percentage / 100
-        )
-
-        grid_energy = (
-            grid_after_solar -
-            renewable_energy
-        )
-
-        # Diesel switching
-
-        diesel_reduced = (
-            baseline_diesel *
-            fuel_switch_percentage / 100
-        )
-
-        scenario_diesel = (
-            baseline_diesel -
-            diesel_reduced
-        )
-
-        scenario_scope1 = (
-            scenario_diesel * DIESEL_EF +
-            baseline_gas * NATURAL_GAS_EF
-        ) / 1000
-
-        scenario_scope2 = (
-            grid_energy *
-            electricity_ef
-        ) / 1000
-
-        scenario_total = (
-            scenario_scope1 +
-            scenario_scope2
-        )
-
-        reduction = (
-            (total_emissions - scenario_total)
-            / total_emissions * 100
-            if total_emissions > 0
-            else 0
-        )
-
-        electricity_saved = (
-            baseline_electricity -
-            efficient_electricity
-        )
-
-        # Simple financial estimate
-
-        electricity_saving = (
-            electricity_saved *
-            tariff
-        )
-
-        fuel_saving = (
-            diesel_reduced *
-            90
-        )
-
-        annual_saving = (
-            electricity_saving +
-            fuel_saving
-        )
-
-        # ----------------------------------------------------
-        # Results
-        # ----------------------------------------------------
-
-        st.subheader("📊 Scenario Results")
-
-        c1, c2, c3, c4 = st.columns(4)
-
-        c1.metric(
-            "Baseline",
-            f"{total_emissions:,.0f} tCO₂e"
-        )
-
-        c2.metric(
-            "Scenario",
-            f"{scenario_total:,.0f} tCO₂e",
-            delta=f"-{total_emissions - scenario_total:,.0f}"
-        )
-
-        c3.metric(
-            "CO₂ Reduction",
-            f"{reduction:.1f}%"
-        )
-
-        c4.metric(
-            "Estimated Saving",
-            f"₹{annual_saving / 100000:.2f} L"
+        scenario_emissions = max(
+            annual_emissions -
+            total_potential_reduction,
+            0
         )
 
         comparison = pd.DataFrame({
-            "Scenario": [
-                "Baseline",
-                "Decarbonized"
+
+            "State": [
+                "Current",
+                "After Opportunities"
             ],
 
             "Emissions": [
-                total_emissions,
-                scenario_total
+                annual_emissions,
+                scenario_emissions
             ]
+
         })
+
 
         fig = px.bar(
             comparison,
-            x="Scenario",
+            x="State",
             y="Emissions",
-            title="Baseline vs Decarbonization Scenario",
+            text="Emissions",
+            title="Current vs Potential Carbon Footprint",
             labels={
-                "Emissions": "tCO₂e"
+                "Emissions": "tCO₂e/year"
             }
+        )
+
+        fig.update_traces(
+            texttemplate="%{text:,.0f}",
+            textposition="outside"
         )
 
         st.plotly_chart(
@@ -710,1113 +1191,271 @@ with tabs[1]:
         )
 
 
-# ============================================================
-# MODEL LOADING
-# ============================================================
-
-BASE_DIR = Path(__file__).resolve().parent
-
-MODEL_PATH = (
-    BASE_DIR /
-    "energy_forecasting_xgboost.pkl"
-)
-
-FEATURE_PATH = (
-    BASE_DIR /
-    "model_features.json"
-)
-
-
-@st.cache_resource
-def load_energy_model():
-
-    if (
-        joblib is None or
-        not MODEL_PATH.exists() or
-        not FEATURE_PATH.exists()
-    ):
-
-        return None, None
-
-    try:
-
-        model = joblib.load(
-            MODEL_PATH
-        )
-
-        with open(
-            FEATURE_PATH,
-            "r"
-        ) as f:
-
-            features = json.load(f)
-
-        return model, features
-
-    except Exception:
-
-        return None, None
-
-
-energy_model, energy_features = (
-    load_energy_model()
-)
-
-
-# ============================================================
-# ENERGY FEATURE ENGINEERING
-# ============================================================
-
-def prepare_energy_data(
-    data,
-    features
-):
-
-    data = data.copy()
-
-    data["date"] = pd.to_datetime(
-        data["date"],
-        errors="coerce"
-    )
-
-    data = (
-        data
-        .sort_values("date")
-        .reset_index(drop=True)
-    )
-
-    data["hour"] = (
-        data["date"].dt.hour
-    )
-
-    data["minute"] = (
-        data["date"].dt.minute
-    )
-
-    data["day_of_week_num"] = (
-        data["date"].dt.dayofweek
-    )
-
-    data["day_of_month"] = (
-        data["date"].dt.day
-    )
-
-    data["month"] = (
-        data["date"].dt.month
-    )
-
-    data["is_weekend"] = (
-        data["day_of_week_num"] >= 5
-    ).astype(int)
-
-    data["quarter_hour"] = (
-        data["hour"] * 4 +
-        data["minute"] // 15
-    )
-
-    data["week_status_encoded"] = (
-        data["WeekStatus"]
-        .map({
-            "Weekday": 0,
-            "Weekend": 1
-        })
-    )
-
-    data["load_type_encoded"] = (
-        data["Load_Type"]
-        .map({
-            "Light_Load": 0,
-            "Medium_Load": 1,
-            "Maximum_Load": 2
-        })
-    )
-
-    # Historical features
-
-    for lag in [1, 2, 4, 8, 96, 672]:
-
-        data[
-            f"usage_lag_{lag}"
-        ] = (
-            data["Usage_kWh"]
-            .shift(lag)
-        )
-
-    # Rolling features
-
-    data["usage_roll_mean_1h"] = (
-        data["Usage_kWh"]
-        .shift(1)
-        .rolling(4)
-        .mean()
-    )
-
-    data["usage_roll_mean_3h"] = (
-        data["Usage_kWh"]
-        .shift(1)
-        .rolling(12)
-        .mean()
-    )
-
-    data["usage_roll_mean_24h"] = (
-        data["Usage_kWh"]
-        .shift(1)
-        .rolling(96)
-        .mean()
-    )
-
-    data["usage_roll_std_1h"] = (
-        data["Usage_kWh"]
-        .shift(1)
-        .rolling(4)
-        .std()
-    )
-
-    data["usage_roll_std_24h"] = (
-        data["Usage_kWh"]
-        .shift(1)
-        .rolling(96)
-        .std()
-    )
-
-    available_features = [
-        f for f in features
-        if f in data.columns
-    ]
-
-    if len(available_features) != len(features):
-
-        missing = [
-            f for f in features
-            if f not in data.columns
-        ]
-
-        raise ValueError(
-            "Missing model features: "
-            + ", ".join(missing)
-        )
-
-    data = data.dropna(
-        subset=features
-    ).reset_index(drop=True)
-
-    return data
-
-
-# ============================================================
-# ENERGY ANALYSIS
-# ============================================================
-
-def analyze_energy(data):
-
-    if energy_model is None:
-
-        raise FileNotFoundError(
-            "XGBoost model files not found."
-        )
-
-    prepared = prepare_energy_data(
-        data,
-        energy_features
-    )
-
-    prepared[
-        "AI_Expected_kWh"
-    ] = energy_model.predict(
-        prepared[energy_features]
-    )
-
-    prepared["Excess_kWh"] = (
-        prepared["Usage_kWh"] -
-        prepared["AI_Expected_kWh"]
-    )
-
-    prepared["Deviation_%"] = (
-        prepared["Excess_kWh"] /
-        prepared["AI_Expected_kWh"].replace(
-            0,
-            np.nan
-        )
-    ) * 100
-
-    mean_error = (
-        prepared["Excess_kWh"].mean()
-    )
-
-    std_error = (
-        prepared["Excess_kWh"].std()
-    )
-
-    if std_error > 0:
-
-        prepared["Z_score"] = (
-            prepared["Excess_kWh"] -
-            mean_error
-        ) / std_error
-
-    else:
-
-        prepared["Z_score"] = 0
-
-    prepared["Anomaly"] = (
-        prepared["Z_score"] > 3
-    )
-
-    prepared[
-        "Potential_Excess_kWh"
-    ] = np.where(
-        prepared["Anomaly"],
-        np.maximum(
-            prepared["Excess_kWh"],
-            0
-        ),
-        0
-    )
-
-    return prepared
-
-
-# ============================================================
-# TAB 3 — ENERGY INTELLIGENCE
-# ============================================================
-
-with tabs[2]:
-
-    st.header("🤖 AI Energy Intelligence")
-
-    st.caption(
-        "AI baseline + anomaly detection for SME energy consumption"
-    )
-
-    energy_file = st.file_uploader(
-        "Upload 15-minute plant energy data",
-        type=["csv"],
-        key="energy_upload"
-    )
-
-    if energy_model is None:
-
-        st.warning(
-            "XGBoost model not found. "
-            "Place these files beside app.py to activate "
-            "the AI forecasting module:"
-        )
-
-        st.code(
-            """
-energy_forecasting_xgboost.pkl
-model_features.json
-            """
-        )
-
-        st.info(
-            "The CarbonTwin and Digital Twin modules "
-            "continue to work without the AI model."
-        )
-
-    elif energy_file is None:
-
-        st.info(
-            "Upload your Steel_industry_data.csv "
-            "to run AI energy analysis."
-        )
-
-    else:
-
-        try:
-
-            energy_df = pd.read_csv(
-                energy_file
+        # ====================================================
+        # INDUSTRY BENCHMARK
+        # ====================================================
+
+        if (
+            benchmark_available
+            and benchmark_industry is not None
+        ):
+
+            st.divider()
+
+            st.subheader(
+                "🏭 Industry Benchmark Intelligence"
             )
 
-            required_energy_columns = [
-                "date",
-                "Usage_kWh",
-                "Lagging_Current_Reactive.Power_kVarh",
-                "Leading_Current_Reactive_Power_kVarh",
-                "Lagging_Current_Power_Factor",
-                "Leading_Current_Power_Factor",
-                "WeekStatus",
-                "Load_Type"
-            ]
+            benchmark_subset = (
+                benchmark_df[
+                    benchmark_df["Industry"]
+                    .astype(str)
+                    .str.strip()
+                    ==
+                    benchmark_industry
+                ]
+                .copy()
+            )
 
-            missing_energy = [
-                c for c in required_energy_columns
-                if c not in energy_df.columns
-            ]
 
-            if missing_energy:
+            if not benchmark_subset.empty:
 
-                st.error(
-                    "Missing columns: "
-                    + ", ".join(missing_energy)
-                )
+                # Get latest available numeric year
+                benchmark_years = [
 
-            else:
+                    c for c in benchmark_subset.columns
 
-                with st.spinner(
-                    "Running AI energy analysis..."
-                ):
+                    if isinstance(c, str)
+                    and " - " in c
+                    and c[:4].isdigit()
 
-                    results = analyze_energy(
-                        energy_df
+                ]
+
+                if benchmark_years:
+
+                    benchmark_year = (
+                        benchmark_years[-1]
                     )
 
-                actual = (
-                    results["Usage_kWh"].sum()
-                )
+                    benchmark_subset[
+                        benchmark_year
+                    ] = pd.to_numeric(
+                        benchmark_subset[
+                            benchmark_year
+                        ],
+                        errors="coerce"
+                    )
 
-                expected = (
-                    results["AI_Expected_kWh"].sum()
-                )
+                    benchmark_subset = (
+                        benchmark_subset
+                        .dropna(
+                            subset=[
+                                benchmark_year
+                            ]
+                        )
+                    )
 
-                excess = (
-                    results[
-                        "Potential_Excess_kWh"
-                    ].sum()
-                )
 
-                anomaly_count = int(
-                    results["Anomaly"].sum()
-                )
+                    benchmark_fuel = (
+                        benchmark_subset
+                        .groupby(
+                            "Fuel Type"
+                        )[benchmark_year]
+                        .sum()
+                        .sort_values(
+                            ascending=False
+                        )
+                    )
 
-                c1, c2, c3, c4 = st.columns(4)
 
-                c1.metric(
-                    "Actual Energy",
-                    f"{actual:,.0f} kWh"
-                )
+                    benchmark_share = (
 
-                c2.metric(
-                    "AI Baseline",
-                    f"{expected:,.0f} kWh"
-                )
+                        benchmark_fuel /
+                        benchmark_fuel.sum() *
+                        100
 
-                c3.metric(
-                    "Potential Excess",
-                    f"{excess:,.0f} kWh"
-                )
+                    )
 
-                c4.metric(
-                    "Anomalous Intervals",
-                    f"{anomaly_count:,}"
-                )
 
-                st.subheader(
-                    "Actual vs AI Expected"
-                )
+                    benchmark_table = pd.DataFrame({
 
-                chart = (
-                    results[
-                        [
-                            "date",
-                            "Usage_kWh",
-                            "AI_Expected_kWh"
+                        "Benchmark Source":
+                            benchmark_share.index,
+
+                        "Share":
+                            benchmark_share.values
+
+                    })
+
+
+                    # --------------------------------------
+                    # Don't show benchmark year
+                    # --------------------------------------
+
+                    st.info(
+                        f"""
+                        **Sector reference:** {industry}
+
+                        The benchmark is used to understand the
+                        dominant carbon/energy sources in this
+                        industry. It is **not** treated as your
+                        factory's current emissions.
+                        """
+                    )
+
+
+                    col1, col2 = st.columns(2)
+
+
+                    with col1:
+
+                        fig = px.bar(
+                            benchmark_table,
+                            x="Benchmark Source",
+                            y="Share",
+                            title="Industry Fuel / Emission Profile",
+                            labels={
+                                "Share":
+                                    "Benchmark share (%)"
+                            }
+                        )
+
+                        fig.update_layout(
+                            xaxis_tickangle=-30
+                        )
+
+                        st.plotly_chart(
+                            fig,
+                            use_container_width=True
+                        )
+
+
+                    with col2:
+
+                        dominant_benchmark = (
+                            benchmark_table
+                            .iloc[0]
+                        )
+
+                        st.metric(
+                            "Largest Industry Carbon Lever",
+                            str(
+                                dominant_benchmark[
+                                    "Benchmark Source"
+                                ]
+                            )
+                        )
+
+                        st.metric(
+                            "Benchmark Share",
+                            f"{dominant_benchmark['Share']:.1f}%"
+                        )
+
+
+                        st.markdown(
+                            """
+                            ### What this means
+
+                            The benchmark helps identify where
+                            decarbonization should be investigated
+                            first.
+
+                            It does **not** replace the factory's
+                            measured energy and emissions data.
+                            """
+                        )
+
+
+                    # --------------------------------------
+                    # Benchmark-driven recommendation
+                    # --------------------------------------
+
+                    top_source = str(
+                        benchmark_table.iloc[0][
+                            "Benchmark Source"
                         ]
-                    ]
-                    .set_index("date")
-                    .rename(
-                        columns={
-                            "Usage_kWh": "Actual",
-                            "AI_Expected_kWh": "Expected"
-                        }
                     )
-                )
 
-                st.line_chart(chart)
+                    if (
+                        "coal" in
+                        top_source.lower()
+                    ):
 
-                st.subheader(
-                    "⚠️ Energy Anomalies"
-                )
+                        recommendation = (
+                            "Thermal fuel/process efficiency "
+                            "and fuel switching should be "
+                            "investigated as high-priority "
+                            "decarbonization pathways."
+                        )
 
-                anomalies = (
-                    results[
-                        results["Anomaly"]
-                    ]
-                    .sort_values(
-                        "Z_score",
-                        ascending=False
-                    )
-                )
+                    elif (
+                        "electric" in
+                        top_source.lower()
+                    ):
 
-                if anomalies.empty:
+                        recommendation = (
+                            "Electrical efficiency, renewable "
+                            "electricity and load optimization "
+                            "should be investigated first."
+                        )
+
+                    elif (
+                        "petroleum" in
+                        top_source.lower()
+                    ):
+
+                        recommendation = (
+                            "Fuel electrification and lower-carbon "
+                            "fuel alternatives should be evaluated."
+                        )
+
+                    else:
+
+                        recommendation = (
+                            "Investigate process efficiency and "
+                            "fuel switching around the dominant "
+                            "energy source."
+                        )
+
 
                     st.success(
-                        "No statistically significant "
-                        "high-energy anomalies detected."
+                        f"💡 **Industry-level insight:** "
+                        f"{recommendation}"
                     )
 
-                else:
 
-                    # IMPORTANT:
-                    # Correct column name used here.
-                    display_columns = [
-                        "date",
-                        "Usage_kWh",
-                        "AI_Expected_kWh",
-                        "Excess_kWh",
-                        "Deviation_%",
-                        "Load_Type",
-                        "Lagging_Current_Power_Factor",
-                        "Lagging_Current_Reactive.Power_kVarh",
-                        "Z_score"
-                    ]
+        # ====================================================
+        # MANAGEMENT TAKEAWAY
+        # ====================================================
 
-                    st.dataframe(
-                        anomalies[
-                            display_columns
-                        ]
-                        .head(20)
-                        .style.format({
-                            "Usage_kWh": "{:.2f}",
-                            "AI_Expected_kWh": "{:.2f}",
-                            "Excess_kWh": "{:.2f}",
-                            "Deviation_%": "{:.1f}%",
-                            "Lagging_Current_Power_Factor":
-                                "{:.3f}",
-                            "Lagging_Current_Reactive.Power_kVarh":
-                                "{:.2f}",
-                            "Z_score": "{:.2f}"
-                        }),
-                        hide_index=True,
-                        use_container_width=True
-                    )
-
-                    worst = anomalies.iloc[0]
-
-                    st.subheader(
-                        "🧠 Operator Interpretation"
-                    )
-
-                    st.warning(
-                        f"""
-High-energy event detected.
-
-Time: {worst["date"]}
-
-Actual consumption:
-{worst["Usage_kWh"]:.2f} kWh
-
-AI expected:
-{worst["AI_Expected_kWh"]:.2f} kWh
-
-Deviation:
-+{worst["Deviation_%"]:.1f}%
-
-Operating regime:
-{worst["Load_Type"]}
-
-Power factor:
-{worst["Lagging_Current_Power_Factor"]:.3f}
-
-Investigate whether the event was caused by:
-• unusual production demand
-• inefficient equipment operation
-• motor loading
-• low power factor
-• flexible loads operating during the interval
-
-This is an investigation opportunity, not proof
-that all excess energy is avoidable.
-"""
-                    )
-
-                potential_cost = (
-                    excess * tariff
-                )
-
-                st.subheader(
-                    "💰 Potential Energy Opportunity"
-                )
-
-                c1, c2, c3 = st.columns(3)
-
-                c1.metric(
-                    "Potential excess",
-                    f"{excess:,.0f} kWh"
-                )
-
-                c2.metric(
-                    "Electricity tariff",
-                    f"₹{tariff:.2f}/kWh"
-                )
-
-                c3.metric(
-                    "Potential cost",
-                    inr(potential_cost)
-                )
-
-        except Exception as e:
-
-            st.error(
-                f"Energy analysis failed: {e}"
-            )
-
-
-# ============================================================
-# SIMPLE UTILITY DIGITAL TWIN
-# ============================================================
-
-def compressor_simulation(
-    band,
-    leak_cut,
-    rotation_hours
-):
-
-    rng = np.random.default_rng(1)
-
-    h = np.arange(1440) / 60
-
-    shift = (
-        (h >= 6) &
-        (h < 22)
-    )
-
-    production = np.where(
-        shift,
-        11 +
-        3 * np.sin(
-            (h - 6) * np.pi / 8
-        ) +
-        rng.normal(
-            0,
-            0.8,
-            1440
-        ),
-        0
-    )
-
-    production = np.convolve(
-        production,
-        np.ones(15) / 15,
-        "same"
-    ).clip(0)
-
-    baseline_demand = (
-        production + 1.6
-    )
-
-    optimized_demand = (
-        production +
-        1.6 * (
-            1 -
-            leak_cut / 100
-        )
-    )
-
-    baseline_power = np.zeros(1440)
-    optimized_power = np.zeros(1440)
-
-    for m in range(1440):
-
-        n = (
-            3 if shift[m]
-            else 1
-        )
-
-        load_fraction = min(
-            baseline_demand[m] /
-            (n * CAP),
-            1
-        )
-
-        baseline_power[m] = (
-            n *
-            P_LOAD *
-            (
-                load_fraction +
-                UNL *
-                (1 - load_fraction)
-            )
-        )
-
-        machines = max(
-            1,
-            int(
-                np.ceil(
-                    optimized_demand[m] /
-                    CAP
-                )
-            )
-        )
-
-        machines = min(
-            machines,
-            3
-        )
-
-        remaining = min(
-            max(
-                optimized_demand[m] -
-                (machines - 1) * CAP,
-                0
-            ),
-            CAP
-        )
-
-        optimized_power[m] = (
-            (
-                (machines - 1) *
-                P_LOAD
-            )
-            +
-            P_LOAD *
-            (
-                0.12 +
-                0.88 *
-                remaining /
-                CAP
-            )
-        )
-
-        optimized_power[m] *= (
-            1 -
-            0.065 * band
-        )
-
-    return {
-        "baseline": baseline_power,
-        "optimized": optimized_power,
-        "production": production
-    }
-
-
-# ============================================================
-# TAB 4 — UTILITY OPTIMIZER
-# ============================================================
-
-with tabs[3]:
-
-    st.header(
-        "⚙️ Industrial Utility Optimizer"
-    )
-
-    st.caption(
-        "Digital-twin scenarios for compressors and industrial utilities"
-    )
-
-    c1, c2, c3 = st.columns(3)
-
-    with c1:
-
-        pressure_reduction = st.slider(
-            "Compressor set-point reduction",
-            0.0,
-            1.5,
-            0.7,
-            0.1
-        )
-
-    with c2:
-
-        leak_reduction = st.slider(
-            "Air leak reduction (%)",
-            0,
-            80,
-            30,
-            5
-        )
-
-    with c3:
-
-        rotation_hours = st.slider(
-            "Lead rotation interval",
-            0,
-            24,
-            4
-        )
-
-    sim = compressor_simulation(
-        pressure_reduction,
-        leak_reduction,
-        rotation_hours
-    )
-
-    baseline_kwh_day = (
-        sim["baseline"].sum() / 60
-    )
-
-    optimized_kwh_day = (
-        sim["optimized"].sum() / 60
-    )
-
-    annual_saving_kwh = (
-        baseline_kwh_day -
-        optimized_kwh_day
-    ) * operating_days
-
-    annual_saving_inr = (
-        annual_saving_kwh *
-        tariff
-    )
-
-    c1, c2, c3 = st.columns(3)
-
-    c1.metric(
-        "Baseline energy/day",
-        f"{baseline_kwh_day:,.0f} kWh"
-    )
-
-    c2.metric(
-        "Optimized energy/day",
-        f"{optimized_kwh_day:,.0f} kWh"
-    )
-
-    c3.metric(
-        "Annual saving",
-        inr(annual_saving_inr)
-    )
-
-    chart = pd.DataFrame({
-        "Baseline kW":
-            sim["baseline"],
-
-        "Optimized kW":
-            sim["optimized"]
-    })
-
-    st.line_chart(chart)
-
-    st.subheader(
-        "Recommended Actions"
-    )
-
-    actions = pd.DataFrame({
-        "Action": [
-            "Reduce compressor pressure",
-            "Repair compressed-air leaks",
-            "Optimize compressor sequencing"
-        ],
-
-        "Potential benefit": [
-            "Lower compressor power",
-            "Lower air demand",
-            "Avoid unloaded operation"
-        ]
-    })
-
-    st.dataframe(
-        actions,
-        hide_index=True,
-        use_container_width=True
-    )
-
-
-# ============================================================
-# PDF GENERATOR
-# ============================================================
-
-def generate_pdf():
-
-    if not REPORTLAB_AVAILABLE:
-
-        return None
-
-    buffer = BytesIO()
-
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=A4
-    )
-
-    styles = getSampleStyleSheet()
-
-    story = []
-
-    story.append(
-        Paragraph(
-            company_name,
-            styles["Title"]
-        )
-    )
-
-    story.append(
-        Paragraph(
-            "GHG Emissions Report — FY 2026–27",
-            styles["Heading2"]
-        )
-    )
-
-    story.append(
-        Spacer(1, 20)
-    )
-
-    story.append(
-        Paragraph(
-            f"Industry: {industry}",
-            styles["Normal"]
-        )
-    )
-
-    story.append(
-        Spacer(1, 15)
-    )
-
-    report_data = [
-        ["Metric", "Value"],
-
-        [
-            "Scope 1",
-            f"{total_scope1:.2f} tCO₂e"
-        ],
-
-        [
-            "Scope 2",
-            f"{total_scope2:.2f} tCO₂e"
-        ],
-
-        [
-            "Total GHG",
-            f"{total_emissions:.2f} tCO₂e"
-        ],
-
-        [
-            "Production",
-            f"{total_production:.2f} tonnes"
-        ],
-
-        [
-            "Emission Intensity",
-            f"{emission_intensity:.4f} tCO₂e/tonne"
-        ]
-    ]
-
-    table = Table(
-        report_data,
-        colWidths=[250, 200]
-    )
-
-    table.setStyle(
-        TableStyle([
-            (
-                "BACKGROUND",
-                (0, 0),
-                (-1, 0),
-                colors.darkgreen
-            ),
-
-            (
-                "TEXTCOLOR",
-                (0, 0),
-                (-1, 0),
-                colors.white
-            ),
-
-            (
-                "GRID",
-                (0, 0),
-                (-1, -1),
-                1,
-                colors.grey
-            ),
-
-            (
-                "PADDING",
-                (0, 0),
-                (-1, -1),
-                8
-            )
-        ])
-    )
-
-    story.append(table)
-
-    story.append(
-        Spacer(1, 20)
-    )
-
-    story.append(
-        Paragraph(
-            "Energy Consumption",
-            styles["Heading2"]
-        )
-    )
-
-    energy_data = [
-        ["Source", "Annual Consumption"],
-
-        [
-            "Electricity",
-            f"{baseline_electricity:,.0f} kWh"
-        ],
-
-        [
-            "Diesel",
-            f"{baseline_diesel:,.0f} L"
-        ],
-
-        [
-            "Natural Gas",
-            f"{baseline_gas:,.0f} SCM"
-        ]
-    ]
-
-    energy_table = Table(
-        energy_data,
-        colWidths=[250, 200]
-    )
-
-    energy_table.setStyle(
-        TableStyle([
-            (
-                "BACKGROUND",
-                (0, 0),
-                (-1, 0),
-                colors.darkgreen
-            ),
-
-            (
-                "TEXTCOLOR",
-                (0, 0),
-                (-1, 0),
-                colors.white
-            ),
-
-            (
-                "GRID",
-                (0, 0),
-                (-1, -1),
-                1,
-                colors.grey
-            ),
-
-            (
-                "PADDING",
-                (0, 0),
-                (-1, -1),
-                8
-            )
-        ])
-    )
-
-    story.append(
-        energy_table
-    )
-
-    doc.build(story)
-
-    buffer.seek(0)
-
-    return buffer
-
-
-# ============================================================
-# TAB 5 — GHG REPORTING
-# ============================================================
-
-with tabs[4]:
-
-    st.header(
-        "📄 GHG Reporting"
-    )
-
-    st.write(
-        """
-        Generate a simplified GHG inventory and
-        buyer sustainability disclosure.
-        """
-    )
-
-    if not carbon_data_available:
-
-        st.warning(
-            "Carbon accounting data is unavailable."
-        )
-
-    else:
+        st.divider()
 
         st.subheader(
-            "GHG Inventory"
+            "💼 Management Takeaway"
         )
 
-        report_df = pd.DataFrame({
-            "Category": [
-                "Scope 1",
-                "Scope 2",
-                "Total"
-            ],
-
-            "Emissions (tCO₂e)": [
-                total_scope1,
-                total_scope2,
-                total_emissions
-            ]
-        })
-
-        st.dataframe(
-            report_df.style.format({
-                "Emissions (tCO₂e)":
-                    "{:,.2f}"
-            }),
-            hide_index=True,
-            use_container_width=True
-        )
-
-        st.subheader(
-            "🤝 Buyer Sustainability Disclosure"
+        top_opportunity = (
+            opportunity_df.iloc[0]
         )
 
         st.markdown(
             f"""
-## {company_name}
+            ### Recommended first action
 
-**Industry:** {industry}
+            **{top_opportunity["Opportunity"]}**
 
-### GHG Emissions
+            Estimated potential:
 
-| Category | Emissions |
-|---|---:|
-| Scope 1 | {total_scope1:,.2f} tCO₂e |
-| Scope 2 | {total_scope2:,.2f} tCO₂e |
-| **Total** | **{total_emissions:,.2f} tCO₂e** |
+            - **CO₂ reduction:** 
+              {top_opportunity["CO₂ Reduction"]:,.1f} tCO₂e/year
+            - **Annual financial benefit:** 
+              ₹{top_opportunity["Annual Saving"]:,.0f}
+            - **Estimated payback:** 
+              {top_opportunity["Payback"]:.1f} years
 
-### Energy Consumption
-
-- Electricity: {baseline_electricity:,.0f} kWh
-- Diesel: {baseline_diesel:,.0f} L
-- Natural Gas: {baseline_gas:,.0f} SCM
-
-### Carbon Intensity
-
-**{emission_intensity:.4f} tCO₂e / tonne**
-
-### Reporting Boundary
-
-Manufacturing operations included in the uploaded dataset.
-
-> Prototype disclosure — emission factors, boundaries and
-> reporting assumptions should be verified before formal use.
-"""
+            The opportunity ranking is based on the current factory
+            baseline and the scenario assumptions selected above.
+            Actual savings should be validated through an engineering
+            assessment before investment.
+            """
         )
-
-        if REPORTLAB_AVAILABLE:
-
-            pdf = generate_pdf()
-
-            st.download_button(
-                "📥 Download GHG Report",
-                data=pdf,
-                file_name="SME_GHG_Report.pdf",
-                mime="application/pdf"
-            )
-
-        else:
-
-            st.warning(
-                "Install reportlab to enable PDF download:"
-            )
-
-            st.code(
-                "pip install reportlab"
-            )
-
-
-# ============================================================
-# FOOTER
-# ============================================================
-
-st.markdown("---")
-
-st.caption(
-    "CarbonTwin — SME Carbon Digital Twin & GHG Reporting Prototype"
-)
