@@ -1324,7 +1324,7 @@ with tab5:
                             fuel_summary,
                             x="Fuel Type",
                             y="Share_%",
-                            text=(fuel_summary["Share_%"].round(1).astype(str)+ "%")
+                            text=(fuel_summary["Share_%"].round(1).astype(str)+ "%"),
                             title=(
                                 "Industry Fuel / "
                                 "Emissions Profile"
